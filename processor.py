@@ -10,6 +10,7 @@ import re
 from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
+from typing import Dict, Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 # ---------------------------------------------------------
@@ -21,6 +22,38 @@ TRACKING_PARAMETERS = {
     "utm_content", "gclid", "fbclid", "msclkid", "ref",
 }
 
+# CHANGE START: Added brand domain lookup profile for ownership matching
+BRAND_PROFILES = {
+    "HubSpot": {
+        "domains": ["hubspot.com"],
+        "aliases": ["hubspot", "hubspot crm"],
+    },
+    "Salesforce": {
+        "domains": ["salesforce.com"],
+        "aliases": ["salesforce", "salesforce crm"],
+    },
+    "Zendesk": {
+        "domains": ["zendesk.com"],
+        "aliases": ["zendesk"],
+    },
+    "Zoho": {
+        "domains": ["zoho.com"],
+        "aliases": ["zoho", "zoho crm"],
+    },
+    "Monday.com": {
+        "domains": ["monday.com"],
+        "aliases": ["monday.com", "monday crm", "monday"],
+    },
+    "Quickbase": {
+        "domains": ["quickbase.com"],
+        "aliases": ["quickbase"],
+    },
+    "Software Advice": {
+        "domains": ["softwareadvice.com"],
+        "aliases": ["software advice"],
+    },
+}
+
 BRAND_ALIASES = {
     "hubspot": "HubSpot",
     "salesforce": "Salesforce",
@@ -30,6 +63,27 @@ BRAND_ALIASES = {
     "quickbase": "Quickbase",
     "softwareadvice": "Software Advice",
 }
+#Knowledge base configuration for source classification
+HIGH_AUTHORITY_DOMAINS = {
+    "news": ["wsj.com", "nytimes.com", "reuters.com", "bloomberg.com", "ft.com", "forbes.com", "techcrunch.com"],
+    "review_platforms": ["g2.com", "capterra.com", "softwareadvice.com", "trustpilot.com", "getapp.com", "trustradius.com"],
+    "social_and_forums": ["reddit.com", "quora.com", "stackoverflow.com", "linkedin.com", "twitter.com", "x.com"],
+    "aggregators_and_markets": ["producthunt.com", "appsumo.com", "github.com"]
+}
+
+PAGE_PATH_PATTERNS = {
+    "customer_review": [r"/review/", r"/reviews/", r"/customer-reviews/", r"/user-reviews/"],
+    "comparison_site": [r"/vs/", r"/versus/", r"/compare/", r"/comparison/", r"/alternatives/"],
+    "editorial": [r"/blog/", r"/article/", r"/insights/", r"/news/", r"/resources/"],
+    "forum": [r"/community/", r"/forum/", r"/forums/", r"/discussion/", r"/r/", r"/q/"],
+    "marketplace": [r"/marketplace/", r"/integrations/", r"/app-store/"]
+}
+
+FEATURE_WORDS = {"feature", "features", "integration", "integrations", "automation", "analytics", "dashboard", "workflow"}
+PRICING_WORDS = {"price", "pricing", "cost", "costs", "cheap", "expensive", "free", "plan", "plans"}
+REVIEW_WORDS = {"review", "reviews", "experience", "used", "using", "customer", "user"}
+COMPARISON_WORDS = {"vs", "versus", "compare", "comparison", "alternative", "alternatives"}
+
 
 # OPTIMIZATION: Compile regexes once at startup with word boundaries (\b)
 # This prevents "monday" from matching the normal word "monday" inside a snippet.
@@ -124,6 +178,113 @@ def detect_brand(title: str, snippet: str, domain: str) -> str | None:
             return brand_name
     return None
 
+# CHANGE START: Page-level source classification and authority analysis engine
+def domain_matches_brand(domain: str, brand: str) -> bool:
+    """Check whether domain belongs to brand's first-party domain configuration."""
+    if not domain or not brand:
+        return False
+    domain = domain.lower()
+    profile = BRAND_PROFILES.get(brand, {})
+
+    for brand_domain in profile.get("domains", []):
+        brand_domain = brand_domain.lower()
+        if domain == brand_domain or domain.endswith("." + brand_domain):
+            return True
+    return False
+
+def classify_ownership(domain: str, brand: str | None) -> str:
+    """Determine ownership status (first_party, third_party, or unknown)."""
+    if not brand:
+        return "unknown"
+    if domain_matches_brand(domain, brand):
+        return "first_party"
+    return "third_party"
+
+def classify_page_source_type(url: str, domain: str, title: str, snippet: str) -> str:
+    """
+    Evaluate URL path, domain properties, title, and snippet to classify source type.
+    Handles page-level differentiation on identical domains.
+    """
+    parsed_url = urlparse(url.lower() if url else "")
+    path = parsed_url.path
+    normalized_domain = domain.lower() if domain else ""
+    text_content = f"{title} {snippet}".lower()
+
+    # 1. Forum / Social
+    if any(d in normalized_domain for d in ["reddit.com", "quora.com", "stackoverflow.com", "forums."]):
+        return "forum"
+    if any(re.search(pat, path) for pat in PAGE_PATH_PATTERNS["forum"]):
+        return "forum"
+    if any(d in normalized_domain for d in ["linkedin.com", "twitter.com", "x.com", "facebook.com"]):
+        return "social"
+
+    # 2. Comparison Site
+    if any(re.search(pat, path) for pat in PAGE_PATH_PATTERNS["comparison_site"]) or " vs " in text_content or " versus " in text_content:
+        return "comparison_site"
+
+    # 3. Customer Review / Review Platform
+    if any(d in normalized_domain for d in HIGH_AUTHORITY_DOMAINS["review_platforms"]):
+        return "review_platform"
+    if any(re.search(pat, path) for pat in PAGE_PATH_PATTERNS["customer_review"]) or "review" in text_content:
+        return "customer_review"
+
+    # 4. News
+    if any(d in normalized_domain for d in HIGH_AUTHORITY_DOMAINS["news"]):
+        if "/news/" in path or "/article/" in path:
+            return "news"
+
+    # 5. Marketplace / Aggregator
+    if any(d in normalized_domain for d in HIGH_AUTHORITY_DOMAINS["aggregators_and_markets"]):
+        return "aggregator"
+    if any(re.search(pat, path) for pat in PAGE_PATH_PATTERNS["marketplace"]):
+        return "marketplace"
+
+    # 6. Editorial vs Independent Blog
+    if any(re.search(pat, path) for pat in PAGE_PATH_PATTERNS["editorial"]):
+        return "editorial"
+    if "/blog/" in path or "blog." in normalized_domain:
+        return "independent_blog"
+
+    return "unknown"
+
+def evaluate_source_authority(url: str, domain: str, title: str, snippet: str) -> Dict[str, str]:
+    """Compute domain authority tier, topical relevance, and source reliability."""
+    normalized_domain = domain.lower() if domain else ""
+    text_tokens = set(re.findall(r"\b\w+\b", f"{title} {snippet}".lower()))
+
+    # Domain Authority heuristic
+    all_top_domains = [d for sublist in HIGH_AUTHORITY_DOMAINS.values() for d in sublist]
+    if any(d in normalized_domain for d in all_top_domains) or normalized_domain.endswith((".edu", ".gov", ".org")):
+        domain_auth = "high"
+    else:
+        domain_auth = "medium"
+
+    # Topical Relevance heuristic
+    relevant_signals = len(text_tokens & (FEATURE_WORDS | PRICING_WORDS | REVIEW_WORDS | COMPARISON_WORDS))
+    topical_rel = "high" if relevant_signals >= 3 else ("medium" if relevant_signals >= 1 else "low")
+
+    # Source Reliability heuristic
+    if domain_auth == "high" and topical_rel in ["high", "medium"]:
+        reliability = "high"
+    elif "forum" in normalized_domain or "reddit" in normalized_domain:
+        reliability = "medium"
+    else:
+        reliability = "medium"
+
+    return {
+        "domain_authority": domain_auth,
+        "topical_relevance": topical_rel,
+        "source_reliability": reliability
+    }
+
+def analyze_source_context(url: str, domain: str, title: str, snippet: str, brand: str | None) -> Dict[str, Any]:
+    """Build full hierarchical source taxonomy payload."""
+    return {
+        "ownership": classify_ownership(domain, brand),
+        "source_type": classify_page_source_type(url, domain, title, snippet),
+        "authority": evaluate_source_authority(url, domain, title, snippet)
+    }
+    
 # ---------------------------------------------------------
 # Visibility scoring
 # ---------------------------------------------------------
@@ -170,6 +331,7 @@ def normalize_results(raw_results: list) -> list:
             "title": title,
             "snippet": snippet,
             "detected_brand": detect_brand(title, snippet, domain),
+            "source": source_context,
             "visibility_weight": round(position_weight(index), 6),
         })
 
@@ -262,15 +424,24 @@ def process_ai_overview(ai_overview: dict) -> dict:
             continue
             
         seen_sources.add(clean_url)
+        domain = extract_domain(clean_url)
+        title = str(source.get("title", "")).strip() if isinstance(source, dict) and source.get("title") else ""
+        detected_brand = detect_brand(title, "", domain)
+
+        # CHANGE START: Classify source context for AI overview citations
+        source_context = analyze_source_context(clean_url, domain, title, "", detected_brand)
+    
         
         src_data = {
             "source_id": create_source_id(clean_url),
             "url": clean_url,
-            "domain": extract_domain(clean_url),
-        }
-        
-        if isinstance(source, dict) and source.get("title"):
-            src_data["title"] = str(source["title"]).strip()
+            "domain": domain,
+            "detected_brand": detected_brand,
+            # CHANGE START: Attach source metadata object to AI citation sources
+            "source": source_context,
+        } 
+       if title:
+            src_data["title"] = title
 
         normalized_sources.append(src_data)
 
