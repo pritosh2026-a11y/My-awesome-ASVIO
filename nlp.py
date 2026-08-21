@@ -492,30 +492,89 @@ def detect_recommendation(text: str) -> dict:
 # Claim extraction
 # ---------------------------------------------------------
 
-def extract_claim_signals(text: str, brand: str) -> list:
+def extract_claim_signals(text: str, brand: str,source_type: str = "website") -> list:
     """
-    Extract simple claim-like sentences containing
+    Extract grounded claim-like sentences containing
     the target brand.
 
     This is deliberately conservative.
+    Now detailed part Classifies sentence-level polarity (positive/negative/neutral), 
+    claim nature (pricing, capability, review, comparison, recommendation),
+    and prominent focus level (core vs incidental).
     """
-    sentences = re.split(r"(?<=[.!?])\s+",str(text or ""))
+    sentences = SENTENCE_SPLITTER.split(str(text or ""))
     claims = []
-    brand_lower = brand.lower()
+   brand_profile = BRAND_PROFILES.get(brand, {})
+    aliases = brand_profile.get("aliases", [brand.lower()])
 
-    for sentence in sentences:
+    escaped_aliases = [re.escape(normalize_text(a)) for a in aliases]
+    brand_pattern = re.compile(
+        rf"(?<![A-Za-z0-9])({'|'.join(escaped_aliases)})(?![A-Za-z0-9])",
+        re.IGNORECASE,
+    )
+
+    for idx, sentence in enumerate(sentences):
         sentence_clean = sentence.strip()
 
-        if not sentence_clean:
+        if not sentence_clean or len(sentence_clean) < 15:
             continue
 
-        if brand_lower not in sentence_clean.lower():
+        normalized_sent = normalize_text(sentence_clean)
+
+        # Check for brand boundary match
+        brand_match = brand_pattern.search(normalized_sent)
+        if not brand_match:
             continue
 
-        claims.append({
+        tokens = tokenize(normalized_sent)
+
+        # Sentence-level polarity assessment
+        pos_signals = [w for w in POSITIVE_WORDS if w in normalized_sent or w in tokens]
+        neg_signals = [w for w in NEGATIVE_WORDS if w in normalized_sent or w in tokens]
+
+        if len(pos_signals) > len(neg_signals):
+            polarity = "positive"
+        elif len(neg_signals) > len(pos_signals):
+            polarity = "negative"
+        else:
+            polarity = "neutral"
+
+        # Categorize claim type
+        claim_type = "general_assertion"
+        if any(w in normalized_sent for w in PRICING_WORDS):
+            claim_type = "pricing_or_cost"
+        elif any(w in normalized_sent for w in COMPARISON_WORDS):
+            claim_type = "competitor_comparison"
+        elif any(w in normalized_sent for w in RECOMMENDATION_WORDS):
+            claim_type = "endorsement_or_recommendation"
+        elif any(w in tokens for w in REVIEW_WORDS) or source_type in ["customer_review", "review_platform", "forum"]:
+            claim_type = "user_experience_or_review"
+        elif any(w in normalized_sent for w in FEATURE_WORDS):
+            claim_type = "feature_capability"
+
+        # Determine if mention is core or incidental
+        is_core_mention = idx == 0 or brand_match.start() < (len(normalized_sent) // 2)
+
+        claims.append(
+            {
                 "text": sentence_clean,
-                "type": "brand_context",
-            })
+                "claim_type": claim_type,
+                "polarity": polarity,
+                "prominence": "core" if is_core_mention else "incidental",
+                "signals": {
+                    "positive": pos_signals,
+                    "negative": neg_signals,
+                },
+                "confidence": 0.85 if is_core_mention else 0.65,
+            }
+        )
+
+    # Prioritize core and high-confidence claims
+    sorted_claims = sorted(
+        claims,
+        key=lambda c: (c["prominence"] == "core", c["confidence"]),
+        reverse=True,
+    )
 
     return claims[:5]
 
@@ -588,7 +647,8 @@ def analyze_result(result: dict,audit_stats: Dict[str, int]) -> dict | None:
         sentiment = classify_sentiment(combined_text, brand)
         topics = detect_topics(combined_text)
         recommendation = detect_recommendation(combined_text)
-        claims = extract_claim_signals(combined_text, brand)
+        
+        claims = extract_claim_signals(combined_text, brand,source_type=source_type)
         
         brand_analyses.append({
                 "brand": brand,
