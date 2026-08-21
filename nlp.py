@@ -230,6 +230,23 @@ SECURITY_WORDS = {
     "authentication",
 }
 
+# --- ADDING THIS BLOCK AFTER SECURITY_WORDS ---(1st Change)
+def compile_word_regex(words: set) -> re.Pattern:
+    """Compiles a set of words/phrases into a single fast regex with word boundaries."""
+    sorted_words = sorted(words, key=len, reverse=True) # Sort so "great choice" matches before "great"
+    escaped = [re.escape(w) for w in sorted_words]
+    return re.compile(rf"\b({'|'.join(escaped)})\b", re.IGNORECASE)
+
+REGEX_POS = compile_word_regex(POSITIVE_WORDS)
+REGEX_NEG = compile_word_regex(NEGATIVE_WORDS)
+REGEX_REC = compile_word_regex(RECOMMENDATION_WORDS)
+REGEX_COMP = compile_word_regex(COMPARISON_WORDS)
+REGEX_REV = compile_word_regex(REVIEW_WORDS)
+REGEX_PRICE = compile_word_regex(PRICING_WORDS)
+REGEX_FEAT = compile_word_regex(FEATURE_WORDS)
+REGEX_SEC = compile_word_regex(SECURITY_WORDS)
+
+SENTENCE_SPLITTER = re.compile(r"(?<=[.!?])\s+")
 
 # ---------------------------------------------------------
 # File helpers
@@ -271,20 +288,6 @@ def normalize_text(text: str) -> str:
 
     return text.strip()
 
-
-def tokenize(text: str) -> set:
-    """
-    Convert text into a simple word set.
-    """
-
-    text = normalize_text(text)
-
-    return set(
-        re.findall(
-            r"[a-z0-9]+(?:-[a-z0-9]+)?",
-            text,
-        )
-    )
 
 
 # ---------------------------------------------------------
