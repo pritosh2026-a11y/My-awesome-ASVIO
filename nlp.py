@@ -8,7 +8,8 @@ Output:
     data/evidence/evidence.json
 
 Purpose:
-    Determine how a brand appears in a search result.
+    Determine how a brand appears in a search result with robust 
+    input validation, partial-failure handling, and audit reporting.
 
 Current NLP layer:
     1. Brand mention detection
@@ -25,10 +26,20 @@ An LLM can be added later as an ambiguity-resolution layer.
 
 import argparse
 import json
+import logging
 import re
+import sys
 from pathlib import Path
+from typing import Any, Dict, List, Set, Tuple
 from urllib.parse import urlparse
 
+# Configure structured logging for runtime error messaging and audit trails
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.StreamHandler(sys.stderr)],
+)
+logger = logging.getLogger("ASVIO_NLP")
 
 # ---------------------------------------------------------
 # Configuration
@@ -107,134 +118,54 @@ BRAND_PROFILES = {
 
 # Words suggesting positive representation.
 POSITIVE_WORDS = {
-    "best",
-    "good",
-    "great",
-    "excellent",
-    "easy",
-    "easy-to-use",
-    "popular",
-    "recommended",
-    "recommend",
-    "powerful",
-    "affordable",
-    "flexible",
-    "reliable",
-    "leading",
-    "top",
-    "efficient",
-    "helpful",
-    "strong",
-    "trusted",
+    "best","good","great","excellent","easy","easy-to-use","popular",
+    "recommended","recommend","powerful","affordable","flexible",
+    "reliable","leading","top","efficient","helpful","strong","trusted",
 }
 
 # Words suggesting negative representation.
 NEGATIVE_WORDS = {
-    "bad",
-    "worst",
-    "expensive",
-    "difficult",
-    "hard",
-    "poor",
-    "slow",
-    "complicated",
-    "problem",
-    "problems",
-    "issue",
-    "issues",
-    "flaw",
-    "flaws",
-    "limited",
-    "negative",
-    "complaint",
-    "complaints",
-    "avoid",
-    "stopped",
-    "disappointed",
+    "bad","worst","expensive","difficult","hard","poor","slow","complicated","problem",
+    "problems","issue","issues","flaw","flaws","limited","negative","complaint","complaints",
+    "avoid","stopped","disappointed",
 }
 
 # Words suggesting recommendation.
 RECOMMENDATION_WORDS = {
-    "best",
-    "top",
-    "recommended",
-    "recommend",
-    "winner",
-    "ideal",
-    "great choice",
-    "good choice",
-    "popular choice",
+    "best""top","recommended","recommend","winner","ideal","great choice","good choice","popular choice",
 }
 
 # Words suggesting comparison.
 COMPARISON_WORDS = {
-    "vs",
-    "versus",
-    "compare",
-    "comparison",
-    "alternative",
-    "alternatives",
-    "compared",
+    "vs","versus","compare","comparison","alternative","alternatives","compared",
 }
 
 # Words suggesting review / experience.
 REVIEW_WORDS = {
-    "review",
-    "reviews",
-    "experience",
-    "used",
-    "using",
-    "customer",
-    "customers",
-    "user",
-    "users",
+    "review","reviews","experience","used","using","customer","customers","user","users",
 }
 
 # Words suggesting pricing.
 PRICING_WORDS = {
-    "price",
-    "pricing",
-    "cost",
-    "costs",
-    "cheap",
-    "expensive",
-    "free",
-    "plan",
-    "plans",
+    "price","pricing","cost","costs","cheap","expensive","free","plan","plans",
 }
 
 # Words suggesting features.
 FEATURE_WORDS = {
-    "feature",
-    "features",
-    "integration",
-    "integrations",
-    "automation",
-    "analytics",
-    "dashboard",
-    "workflow",
-    "workflows",
-    "customization",
-    "customisation",
+    "feature","features","integration","integrations","automation","analytics",
+    "dashboard","workflow","workflows","customization","customisation",
 }
 
 # Words suggesting security.
 SECURITY_WORDS = {
-    "security",
-    "secure",
-    "compliance",
-    "privacy",
-    "gdpr",
-    "soc",
-    "encryption",
-    "authentication",
+    "security","secure","compliance","privacy","gdpr","soc","encryption","authentication",
 }
 
 import re
 
 
 # ---------------------------------------------------------
-# TEXT NORMALIZATION
+# TEXT NORMALIZATION & TOKENIZATION
 # ---------------------------------------------------------
 
 def normalize_text(text: str) -> str:
@@ -253,13 +184,8 @@ def normalize_text(text: str) -> str:
         " ",
         text,
     )
-
     return text.strip()
 
-
-# ---------------------------------------------------------
-# TOKENIZATION
-# ---------------------------------------------------------
 
 def tokenize(text: str) -> set:
     """
@@ -393,41 +319,22 @@ def save_json(data, path: Path):
 # Brand detection
 # ---------------------------------------------------------
 
-def detect_brand_mentions(
-    text: str,
-) -> list:
-    """
-    Find brands explicitly mentioned in title/snippet.
-    """
-
+def detect_brand_mentions(text: str,) -> list:
     normalized = normalize_text(text)
-
     mentions = []
 
     for brand, profile in BRAND_PROFILES.items():
-
         matched_alias = None
-
-        # Sort aliases by length descending so longer/more specific aliases match first
-        sorted_aliases = sorted(
-            profile["aliases"],
-            key=len,
-            reverse=True,
-        )
+        sorted_aliases = sorted(profile["aliases"],key=len,reverse=True,)
 
         for alias in sorted_aliases:
-
             alias_normalized = normalize_text(alias)
-
-            # Use word boundary checks to avoid accidental partial matches
             pattern = rf"(?<![A-Za-z0-9]){re.escape(alias_normalized)}(?![A-Za-z0-9])"
-
             if re.search(pattern, normalized):
                 matched_alias = alias
                 break
                 
         if matched_alias:
-
             mentions.append(
                 {
                     "brand": brand,
