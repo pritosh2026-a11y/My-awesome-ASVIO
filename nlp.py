@@ -347,110 +347,6 @@ def detect_brand_mentions(text: str,) -> list:
 
 
 # ---------------------------------------------------------
-# Ownership detection
-# ---------------------------------------------------------
-
-def domain_matches_brand(
-    domain: str,
-    brand: str,
-) -> bool:
-    """
-    Determine whether the result's domain belongs to
-    the brand.
-    """
-
-    domain = normalize_text(domain)
-
-    profile = BRAND_PROFILES.get(
-        brand,
-        {},
-    )
-
-    for brand_domain in profile.get(
-        "domains",
-        [],
-    ):
-
-        brand_domain = normalize_text(
-            brand_domain
-        )
-
-        if (
-            domain == brand_domain
-            or domain.endswith(
-                "." + brand_domain
-            )
-        ):
-            return True
-
-    return False
-
-
-def determine_ownership(
-    domain: str,
-    brand: str,
-) -> dict:
-
-    if domain_matches_brand(
-        domain,
-        brand,
-    ):
-
-        return {
-            "type": "owned",
-            "confidence": 0.99,
-        }
-
-    return {
-        "type": "third_party",
-        "confidence": 0.90,
-    }
-
-
-# ---------------------------------------------------------
-# Source classification
-# ---------------------------------------------------------
-
-def classify_source_type(
-    domain: str,
-) -> str:
-
-    domain = normalize_text(domain)
-
-    if "reddit.com" in domain:
-        return "community"
-
-    if (
-        "quora.com" in domain
-        or "forums." in domain
-    ):
-        return "community"
-
-    if (
-        "g2.com" in domain
-        or "capterra.com" in domain
-        or "softwareadvice.com" in domain
-    ):
-        return "review_platform"
-
-    if (
-        "forbes.com" in domain
-        or "techcrunch.com" in domain
-        or "wsj.com" in domain
-        or "nytimes.com" in domain
-    ):
-        return "media"
-
-    if (
-        "google.com" in domain
-        or "bing.com" in domain
-    ):
-        return "search_engine"
-
-    return "website"
-
-
-# ---------------------------------------------------------
 # Role classification
 # ---------------------------------------------------------
 
@@ -466,53 +362,18 @@ def classify_role(
     normalized = normalize_text(text)
     tokens = tokenize(normalized)
 
-    # Owned page.
-    if ownership == "owned":
+    if ownership == "first_party":
+        return {"type": "brand_owned", "confidence": 0.99}
+    if any(word in normalized for word in COMPARISON_WORDS):
+        return {"type": "competitor_comparison", "confidence": 0.90}
+    if any(word in normalized for word in RECOMMENDATION_WORDS):
+        return {"type": "recommended_option", "confidence": 0.82}
+    if any(word in tokens for word in REVIEW_WORDS):
+        return {"type": "review_or_experience", "confidence": 0.78}
 
-        return {
-            "type": "brand_owned",
-            "confidence": 0.99,
-        }
+    return {"type": "mentioned", "confidence": 0.70}
 
-    # Comparison.
-    if any(
-        word in normalized
-        for word in COMPARISON_WORDS
-    ):
-
-        return {
-            "type": "competitor_comparison",
-            "confidence": 0.90,
-        }
-
-    # Recommendation.
-    if any(
-        word in normalized
-        for word in RECOMMENDATION_WORDS
-    ):
-
-        return {
-            "type": "recommended_option",
-            "confidence": 0.82,
-        }
-
-    # Review / experience.
-    if any(
-        word in tokens
-        for word in REVIEW_WORDS
-    ):
-
-        return {
-            "type": "review_or_experience",
-            "confidence": 0.78,
-        }
-
-    # Otherwise it is simply mentioned.
-    return {
-        "type": "mentioned",
-        "confidence": 0.70,
-    }
-
+   
 
 # ---------------------------------------------------------
 # Sentiment
@@ -565,39 +426,17 @@ def classify_sentiment(
 
         sentiment = "neutral"
 
-    total = (
-        positive_score
-        + negative_score
-    )
-
-    if total == 0:
-
-        confidence = 0.50
-
-    else:
-
-        confidence = min(
-            0.50
-            + (
-                abs(
-                    positive_score
-                    - negative_score
-                )
-                / total
-            )
-            * 0.50,
-            0.99,
-        )
+   total = positive_score + negative_score
+    confidence = 0.50 if total == 0 else min(0.50 + (abs(positive_score - negative_score) / total) * 0.50, 0.99)
 
     return {
         "label": sentiment,
-        "confidence": round(
-            confidence,
-            2,
-        ),
+        "confidence": round(confidence, 2),
         "positive_signals": positive_matches,
         "negative_signals": negative_matches,
     }
+
+        
 
 
 # ---------------------------------------------------------
@@ -613,34 +452,19 @@ def detect_topics(
 
     topics = []
 
-    if any(
-        word in normalized
-        for word in PRICING_WORDS
-    ):
+    if any(word in normalized for word in PRICING_WORDS):
         topics.append("pricing")
 
-    if any(
-        word in normalized
-        for word in FEATURE_WORDS
-    ):
+    if any(word in normalized for word in FEATURE_WORDS):
         topics.append("features")
 
-    if any(
-        word in normalized
-        for word in SECURITY_WORDS
-    ):
+    if any(word in normalized for word in SECURITY_WORDS):
         topics.append("security")
 
-    if any(
-        word in normalized
-        for word in COMPARISON_WORDS
-    ):
+    if any(word in normalized for word in COMPARISON_WORDS):
         topics.append("comparison")
 
-    if any(
-        word in tokens
-        for word in REVIEW_WORDS
-    ):
+    if any(word in tokens for word in REVIEW_WORDS):
         topics.append("user_experience")
 
     if not topics:
@@ -653,24 +477,14 @@ def detect_topics(
 # Recommendation detection
 # ---------------------------------------------------------
 
-def detect_recommendation(
-    text: str,
-) -> dict:
+def detect_recommendation(text: str) -> dict:
 
     normalized = normalize_text(text)
-
-    matches = [
-        phrase
-        for phrase in RECOMMENDATION_WORDS
-        if phrase in normalized
-    ]
-
-    return {
-        "detected": bool(matches),
-        "signals": matches,
-        "confidence": (
-            0.85 if matches else 0.50
-        ),
+    matches = [phrase for phrase in RECOMMENDATION_WORDSif phrase in normalized]
+    return { 
+        "detected": bool(matches), 
+        "signals": matches,  
+        "confidence": (0.85 if matches else 0.50),
     }
 
 
@@ -678,28 +492,18 @@ def detect_recommendation(
 # Claim extraction
 # ---------------------------------------------------------
 
-def extract_claim_signals(
-    text: str,
-    brand: str,
-) -> list:
+def extract_claim_signals(text: str, brand: str) -> list:
     """
     Extract simple claim-like sentences containing
     the target brand.
 
     This is deliberately conservative.
     """
-
-    sentences = re.split(
-        r"(?<=[.!?])\s+",
-        str(text or ""),
-    )
-
+    sentences = re.split(r"(?<=[.!?])\s+",str(text or ""))
     claims = []
-
     brand_lower = brand.lower()
 
     for sentence in sentences:
-
         sentence_clean = sentence.strip()
 
         if not sentence_clean:
@@ -708,131 +512,98 @@ def extract_claim_signals(
         if brand_lower not in sentence_clean.lower():
             continue
 
-        claims.append(
-            {
+        claims.append({
                 "text": sentence_clean,
                 "type": "brand_context",
-            }
-        )
+            })
 
     return claims[:5]
 
 
 # ---------------------------------------------------------
-# Analyze one result
+# VALIDATION & PIPELINE LOGIC
 # ---------------------------------------------------------
 
-def analyze_result(
-    result: dict,
-) -> dict:
+def validate_input_schema(data: Any) -> Tuple[bool, List[str]]:
+    """Strict schema validation for input data payload."""
+    errors = []
+    if not isinstance(data, dict):
+        return False, ["Root payload must be a JSON object."]
 
-    source_id = result.get(
-        "source_id"
-    )
+    if "records" not in data:
+        errors.append("Missing mandatory 'records' key in root payload.")
+    elif not isinstance(data["records"], list):
+        errors.append("Field 'records' must be a list.")
 
-    rank = result.get(
-        "rank"
-    )
+    return len(errors) == 0, errors
 
-    domain = result.get(
-        "domain",
-        "",
-    )
 
-    title = result.get(
-        "title",
-        "",
-    )
+def analyze_result(result: dict,audit_stats: Dict[str, int]) -> dict | None:
+    """Analyze a single result entry safely using pre-computed source metadata."""
+    if not isinstance(result, dict):
+        logger.warning("Skipping malformed non-dict result record: %s", type(result))
+        audit_stats["invalid_result_structures"] += 1
+        return None
 
-    snippet = result.get(
-        "snippet",
-        "",
-    )
+    source_id = result.get("source_id")
+    rank = result.get("rank")
+    domain = result.get("domain", "")
+    title = result.get("title", "")
+    snippet = result.get("snippet", "")
+    url = result.get("url", "")
 
-    url = result.get(
-        "url",
-        "",
-    )
+    if not url:
+        logger.warning("Result entry missing 'url' (source_id=%s, rank=%s)", source_id, rank)
+        audit_stats["missing_url_warnings"] += 1
 
-    combined_text = (
-        f"{title}. {snippet}"
-    )
+    combined_text = f"{title}. {snippet}".strip()
+    if combined_text == ".":
+        logger.warning("Result entry has no title or snippet text (source_id=%s)", source_id)
+        audit_stats["empty_text_warnings"] += 1
 
-    mentions = detect_brand_mentions(
-        combined_text
-    )
-
-    source_type = classify_source_type(
-        domain
-    )
-
+    mentions = detect_brand_mentions(combined_text)
     brand_analyses = []
 
-    for mention in mentions:
+    # Read pre-computed source metadata from processor.py, or fallback gracefully
+    source_meta = result.get("source")
+    if not isinstance(source_meta, dict):
+        logger.warning("Result entry missing pre-computed 'source' object (source_id=%s)", source_id)
+        audit_stats["missing_source_metadata_warnings"] = audit_stats.get("missing_source_metadata_warnings", 0) + 1
+        source_meta = {
+            "ownership": "unknown",
+            "source_type": "unknown",
+            "authority": {
+                "domain_authority": "medium",
+                "topical_relevance": "medium",
+                "source_reliability": "medium"
+            }
+        }
 
+    ownership_type = source_meta.get("ownership", "unknown")
+
+    for mention in mentions:
         brand = mention["brand"]
 
-        ownership = determine_ownership(
-            domain,
-            brand,
-        )
-
-        role = classify_role(
-            combined_text,
-            brand,
-            ownership["type"],
-        )
-
-        sentiment = classify_sentiment(
-            combined_text,
-            brand,
-        )
-
-        topics = detect_topics(
-            combined_text
-        )
-
-        recommendation = detect_recommendation(
-            combined_text
-        )
-
-        claims = extract_claim_signals(
-            combined_text,
-            brand,
-        )
-
-        brand_analyses.append(
-            {
+        role = classify_role(combined_text, brand, ownership_type)
+        sentiment = classify_sentiment(combined_text, brand)
+        topics = detect_topics(combined_text)
+        recommendation = detect_recommendation(combined_text)
+        claims = extract_claim_signals(combined_text, brand)
+        
+        brand_analyses.append({
                 "brand": brand,
-
                 "mention": {
                     "detected": True,
-                    "matched_alias": mention[
-                        "matched_alias"
-                    ],
-                    "confidence": mention[
-                        "confidence"
-                    ],
+                    "matched_alias": mention["matched_alias"],
+                    "confidence": mention["confidence"],
                 },
-
-                "ownership": ownership,
-
-                "source": {
-                    "domain": domain,
-                    "type": source_type,
-                },
-
+                "source": source_meta,
                 "role": role,
-
                 "sentiment": sentiment,
-
                 "topics": topics,
-
                 "recommendation": recommendation,
-
                 "claims": claims,
-            }
-        )
+            })
 
     return {
         "source_id": source_id,
@@ -848,47 +619,57 @@ def analyze_result(
 # Process normalized data
 # ---------------------------------------------------------
 
-def process_normalized_data(
-    data: dict,
-) -> dict:
+def process_normalized_data(data: dict) -> dict:
+    """Processes normalized data payload with full validation, recovery, and audit tracking."""
+    is_valid, validation_errors = validate_input_schema(data)
+    if not is_valid:
+        error_msg = "; ".join(validation_errors)
+        logger.error("Schema validation failed: %s", error_msg)
+        raise ValueError(f"Invalid input schema: {error_msg}")
+
+    audit_stats = {
+        "total_records_processed": 0,
+        "total_results_processed": 0,
+        "invalid_result_structures": 0,
+        "missing_url_warnings": 0,
+        "empty_text_warnings": 0,
+        "malformed_records_skipped": 0,
+        "missing_source_metadata_warnings": 0,
+    }
 
     evidence_records = []
+    records = data.get("records", [])
 
-    records = data.get(
-        "records",
-        [],
-    )
+    for idx, record in enumerate(records):
+        if not isinstance(record, dict):
+            logger.warning("Skipping non-dict record at index %d", idx)
+            audit_stats["malformed_records_skipped"] += 1
+            continue
 
-    for record in records:
+        query = record.get("query", "")
+        if not query:
+            logger.warning("Record at index %d has an empty or missing 'query' string", idx)
 
-        query = record.get(
-            "query",
-            "",
-        )
-
-        results = record.get(
-            "results",
-            [],
-        )
+        results = record.get("results", [])
+        if not isinstance(results, list):
+            logger.warning("Record query '%s' has non-list 'results' field. Defaulting to empty list.", query)
+            results = []
 
         analyzed_results = []
-
         for result in results:
+            audit_stats["total_results_processed"] += 1
+            analyzed = analyze_result(result, audit_stats)
+            if analyzed is not None:
+                analyzed_results.append(analyzed)
 
-            analyzed = analyze_result(
-                result
-            )
+        evidence_records.append({
+            "query": query,
+            "results": analyzed_results,
+        })
+        audit_stats["total_records_processed"] += 1
 
-            analyzed_results.append(
-                analyzed
-            )
+    logger.info("Processing complete. Audit Summary: %s", json.dumps(audit_stats))
 
-        evidence_records.append(
-            {
-                "query": query,
-                "results": analyzed_results,
-            }
-        )
 
     return {
         "project": "ASVIO",
@@ -905,58 +686,27 @@ def process_normalized_data(
 def main():
 
     parser = argparse.ArgumentParser(
-        description=(
-            "Analyze normalized ASVIO search data."
-        )
+        description=( "Analyze normalized ASVIO search data.")
     )
 
-    parser.add_argument(
-        "--input",
-        default=(
-            "data/normalized/normalized.json"
-        ),
-        help="Normalized JSON input",
-    )
-
-    parser.add_argument(
-        "--output",
-        default=(
-            "data/evidence/evidence.json"
-        ),
-        help="Evidence JSON output",
-    )
+    parser.add_argument("--input", default="data/normalized/normalized.json",help="Normalized JSON input",)
+    parser.add_argument("--output",default= "data/evidence/evidence.json",help="Evidence JSON output",)
 
     args = parser.parse_args()
+    input_path = Path(args.input)
+    output_path = Path(args.output)
 
-    input_path = Path(
-        args.input
-    )
+ try:   
+    data = load_json(input_path)
+    evidence = process_normalized_data(data)
+    save_json(evidence,output_path)
 
-    output_path = Path(
-        args.output
-    )
+    print("ASVIO NLP processing complete.")
+    print(f"Evidence output: {output_path}")
 
-    data = load_json(
-        input_path
-    )
-
-    evidence = process_normalized_data(
-        data
-    )
-
-    save_json(
-        evidence,
-        output_path
-    )
-
-    print(
-        "ASVIO NLP processing complete."
-    )
-
-    print(
-        f"Evidence output: {output_path}"
-    )
-
+except Exception as e:
+        logger.error("Execution failed: %s", str(e), exc_info=True)
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
