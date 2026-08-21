@@ -230,23 +230,145 @@ SECURITY_WORDS = {
     "authentication",
 }
 
-# --- ADDING THIS BLOCK AFTER SECURITY_WORDS ---(1st Change)
+import re
+
+
+# ---------------------------------------------------------
+# TEXT NORMALIZATION
+# ---------------------------------------------------------
+
+def normalize_text(text: str) -> str:
+    """
+    Normalize text for matching.
+
+    - Converts input to string safely.
+    - Converts text to lowercase.
+    - Collapses repeated whitespace.
+    - Removes leading/trailing whitespace.
+    """
+    text = str(text or "").lower()
+
+    text = re.sub(
+        r"\s+",
+        " ",
+        text,
+    )
+
+    return text.strip()
+
+
+# ---------------------------------------------------------
+# TOKENIZATION
+# ---------------------------------------------------------
+
+def tokenize(text: str) -> set:
+    """
+    Convert text into a simple word set.
+
+    Retained for backward compatibility and fast
+    word-level membership checks.
+    """
+    text = normalize_text(text)
+
+    return set(
+        re.findall(r"\b\w+\b", text)
+    )
+
+
+def tokenize_with_positions(text: str) -> list[tuple[str, int]]:
+    """
+    Convert text into positional tokens.
+
+    Returns:
+        List of (token, position) tuples.
+
+    Example:
+        "HubSpot is very good"
+
+        [
+            ("hubspot", 0),
+            ("is", 1),
+            ("very", 2),
+            ("good", 3),
+        ]
+
+    Unlike tokenize(), this preserves:
+    - word order
+    - token position
+    - repeated occurrences
+    """
+    text = normalize_text(text)
+
+    return [
+        (match.group(), index)
+        for index, match in enumerate(
+            re.finditer(r"\b\w+\b", text)
+        )
+    ]
+
+
+# ---------------------------------------------------------
+# KEYWORD / PHRASE REGEX COMPILATION
+# ---------------------------------------------------------
+
 def compile_word_regex(words: set) -> re.Pattern:
-    """Compiles a set of words/phrases into a single fast regex with word boundaries."""
-    sorted_words = sorted(words, key=len, reverse=True) # Sort so "great choice" matches before "great"
-    escaped = [re.escape(w) for w in sorted_words]
-    return re.compile(rf"\b({'|'.join(escaped)})\b", re.IGNORECASE)
+    """
+    Compile a set of words/phrases into a single
+    case-insensitive regex.
+
+    Longer phrases are placed first so that expressions
+    such as 'great choice' are considered before shorter
+    expressions such as 'great'.
+
+    re.escape() ensures configured terms are treated
+    literally rather than as regex syntax.
+    """
+
+    sorted_words = sorted(
+        words,
+        key=len,
+        reverse=True,
+    )
+
+    escaped = [
+        re.escape(word)
+        for word in sorted_words
+    ]
+
+    return re.compile(
+        rf"(?<![A-Za-z0-9])({'|'.join(escaped)})(?![A-Za-z0-9])",
+        re.IGNORECASE,
+    )
+
+
+# ---------------------------------------------------------
+# COMPILED REGEX PATTERNS
+# ---------------------------------------------------------
 
 REGEX_POS = compile_word_regex(POSITIVE_WORDS)
+
 REGEX_NEG = compile_word_regex(NEGATIVE_WORDS)
+
 REGEX_REC = compile_word_regex(RECOMMENDATION_WORDS)
+
 REGEX_COMP = compile_word_regex(COMPARISON_WORDS)
+
 REGEX_REV = compile_word_regex(REVIEW_WORDS)
+
 REGEX_PRICE = compile_word_regex(PRICING_WORDS)
+
 REGEX_FEAT = compile_word_regex(FEATURE_WORDS)
+
 REGEX_SEC = compile_word_regex(SECURITY_WORDS)
 
-SENTENCE_SPLITTER = re.compile(r"(?<=[.!?])\s+")
+
+# ---------------------------------------------------------
+# SENTENCE SPLITTING
+# ---------------------------------------------------------
+
+SENTENCE_SPLITTER = re.compile(
+    r"(?<=[.!?])\s+"
+)
 
 # ---------------------------------------------------------
 # File helpers
