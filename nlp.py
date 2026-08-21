@@ -275,37 +275,32 @@ def tokenize(text: str) -> set:
     )
 
 
-def tokenize_with_positions(text: str) -> list[tuple[str, int]]:
+def tokenize_with_positions(text: str) -> list[tuple[str , int, int]]:
     """
-    Convert text into positional tokens.
-
-    Returns:
-        List of (token, position) tuples.
+Returns:
+        List of (token, start_char_index, end_char_index) tuples.
 
     Example:
         "HubSpot is very good"
 
         [
-            ("hubspot", 0),
-            ("is", 1),
-            ("very", 2),
-            ("good", 3),
+            ("hubspot", 0, 7),
+            ("is", 8, 10),
+            ("very", 11, 15),
+            ("good", 16, 20),
         ]
 
-    Unlike tokenize(), this preserves:
+    Preserves:
     - word order
-    - token position
+    - character offsets (start and end position)
     - repeated occurrences
     """
     text = normalize_text(text)
 
     return [
-        (match.group(), index)
-        for index, match in enumerate(
-            re.finditer(r"\b\w+\b", text)
-        )
+        (match.group(), match.start(), match.end())
+       for match in re.finditer(r"\b\w+\b", text)
     ]
-
 
 # ---------------------------------------------------------
 # KEYWORD / PHRASE REGEX COMPILATION
@@ -391,25 +386,7 @@ def save_json(data, path: Path):
         )
 
 
-# ---------------------------------------------------------
-# Text helpers
-# ---------------------------------------------------------
-
-def normalize_text(text: str) -> str:
-    """
-    Normalize text for matching.
-    """
-
-    text = str(text or "").lower()
-
-    text = re.sub(
-        r"\s+",
-        " ",
-        text,
-    )
-
-    return text.strip()
-
+#Removed duplicate normalize_text definition and redundant re import
 
 
 # ---------------------------------------------------------
@@ -431,14 +408,24 @@ def detect_brand_mentions(
 
         matched_alias = None
 
-        for alias in profile["aliases"]:
+        # Sort aliases by length descending so longer/more specific aliases match first
+        sorted_aliases = sorted(
+            profile["aliases"],
+            key=len,
+            reverse=True,
+        )
+
+        for alias in sorted_aliases:
 
             alias_normalized = normalize_text(alias)
 
-            if alias_normalized in normalized:
+            # Use word boundary checks to avoid accidental partial matches
+            pattern = rf"(?<![A-Za-z0-9]){re.escape(alias_normalized)}(?![A-Za-z0-9])"
+
+            if re.search(pattern, normalized):
                 matched_alias = alias
                 break
-
+                
         if matched_alias:
 
             mentions.append(
@@ -447,7 +434,7 @@ def detect_brand_mentions(
                     "matched_alias": matched_alias,
                     "confidence": 0.95,
                 }
-            )
+            )            
 
     return mentions
 
