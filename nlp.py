@@ -426,8 +426,8 @@ def classify_sentiment(
 
         sentiment = "neutral"
 
-   total = positive_score + negative_score
-    confidence = 0.50 if total == 0 else min(0.50 + (abs(positive_score - negative_score) / total) * 0.50, 0.99)
+     total = positive_score + negative_score
+     confidence = 0.50 if total == 0 else min(0.50 + (abs(positive_score - negative_score) / total) * 0.50, 0.99)
 
     return {
         "label": sentiment,
@@ -480,7 +480,7 @@ def detect_topics(
 def detect_recommendation(text: str) -> dict:
 
     normalized = normalize_text(text)
-    matches = [phrase for phrase in RECOMMENDATION_WORDSif phrase in normalized]
+    matches = [phrase for phrase in RECOMMENDATION_WORDS if phrase in normalized]
     return { 
         "detected": bool(matches), 
         "signals": matches,  
@@ -577,6 +577,7 @@ def extract_claim_signals(text: str, brand: str,source_type: str = "website") ->
     )
 
     return claims[:5]
+    return sorted_claims[:5]
 
 
 # ---------------------------------------------------------
@@ -648,7 +649,11 @@ def analyze_result(result: dict,audit_stats: Dict[str, int]) -> dict | None:
         topics = detect_topics(combined_text)
         recommendation = detect_recommendation(combined_text)
         
-        claims = extract_claim_signals(combined_text, brand,source_type=source_type)
+        claims = extract_claim_signals(
+            combined_text,
+            brand,
+            source_type=source_meta.get("source_type","unknown"),
+        )
         
         brand_analyses.append({
                 "brand": brand,
@@ -756,17 +761,17 @@ def main():
     input_path = Path(args.input)
     output_path = Path(args.output)
 
- try:   
-    data = load_json(input_path)
-    evidence = process_normalized_data(data)
-    save_json(evidence,output_path)
+     try:   
+        data = load_json(input_path)
+        evidence = process_normalized_data(data)
+        save_json(evidence,output_path)
 
-    print("ASVIO NLP processing complete.")
-    print(f"Evidence output: {output_path}")
+        print("ASVIO NLP processing complete.")
+        print(f"Evidence output: {output_path}")
 
-except Exception as e:
-        logger.error("Execution failed: %s", str(e), exc_info=True)
-        sys.exit(1)
+     except Exception as e:
+            logger.error("Execution failed: %s", str(e), exc_info=True)
+            sys.exit(1)
 
 if __name__ == "__main__":
     main()
