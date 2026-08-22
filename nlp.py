@@ -30,7 +30,7 @@ import logging
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, Optional,
+from typing import Any, Dict, List, Tuple
 from urllib.parse import urlparse
 
 # Configure structured logging for runtime error messaging and audit trails
@@ -175,7 +175,6 @@ def normalize_text(text: str) -> str:
     - Removes leading/trailing whitespace.
     """
     text = str(text or "").lower()
-
     text = re.sub(
         r"\s+",
         " ",
@@ -187,42 +186,13 @@ def normalize_text(text: str) -> str:
 def tokenize(text: str) -> set:
     """
     Convert text into a simple word set.
-
     Retained for backward compatibility and fast
     word-level membership checks.
     """
     text = normalize_text(text)
-
     return set(
         re.findall(r"\b\w+\b", text)
     )
-
-
-def tokenize_with_positions(text: str) -> list[tuple[str , int, int]]:
-    """
-Returns:
-        List of (token, start_char_index, end_char_index) tuples.
-
-    Example:
-        "HubSpot is very good"
-
-        [
-            ("hubspot", 0, 7),
-            ("is", 8, 10),
-            ("very", 11, 15),
-            ("good", 16, 20),
-        ]
-
-    Preserves:
-    - word order
-    - character offsets (start and end position)
-    - repeated occurrences
-    """
-    text = normalize_text(text)
-    return [
-        (match.group(), match.start(), match.end())
-       for match in re.finditer(r"\b\w+\b", text)
-    ]
 
 # ---------------------------------------------------------
 # KEYWORD / PHRASE REGEX COMPILATION
@@ -232,7 +202,6 @@ def compile_word_regex(words: set) -> re.Pattern:
     """
     Compile a set of words/phrases into a single
     case-insensitive regex.
-
     Longer phrases are placed first so that expressions
     such as 'great choice' are considered before shorter
     expressions such as 'great'.
@@ -257,25 +226,17 @@ def compile_word_regex(words: set) -> re.Pattern:
         re.IGNORECASE,
     )
 
-
 # ---------------------------------------------------------
 # COMPILED REGEX PATTERNS
 # ---------------------------------------------------------
 
 REGEX_POS = compile_word_regex(POSITIVE_WORDS)
-
 REGEX_NEG = compile_word_regex(NEGATIVE_WORDS)
-
 REGEX_REC = compile_word_regex(RECOMMENDATION_WORDS)
-
 REGEX_COMP = compile_word_regex(COMPARISON_WORDS)
-
 REGEX_REV = compile_word_regex(REVIEW_WORDS)
-
 REGEX_PRICE = compile_word_regex(PRICING_WORDS)
-
 REGEX_FEAT = compile_word_regex(FEATURE_WORDS)
-
 REGEX_SEC = compile_word_regex(SECURITY_WORDS)
 
 
@@ -306,9 +267,6 @@ def save_json(data, path: Path):
             indent=2,
             ensure_ascii=False,
         )
-
-
-#Removed duplicate normalize_text definition and redundant re import
 
 
 # ---------------------------------------------------------
@@ -414,15 +372,12 @@ def classify_sentiment(
     )
 
     if positive_score > negative_score:
-
         sentiment = "positive"
 
     elif negative_score > positive_score:
-
         sentiment = "negative"
 
     else:
-
         sentiment = "neutral"
 
     total = positive_score + negative_score
@@ -435,42 +390,29 @@ def classify_sentiment(
         "negative_signals": negative_matches,
     }
 
-        
-
-
 # ---------------------------------------------------------
 # Topic detection
 # ---------------------------------------------------------
-
 def detect_topics(
     text: str,
 ) -> list:
 
     normalized = normalize_text(text)
     tokens = tokenize(normalized)
-
     topics = []
-
     if any(word in normalized for word in PRICING_WORDS):
         topics.append("pricing")
-
     if any(word in normalized for word in FEATURE_WORDS):
         topics.append("features")
-
     if any(word in normalized for word in SECURITY_WORDS):
         topics.append("security")
-
     if any(word in normalized for word in COMPARISON_WORDS):
         topics.append("comparison")
-
     if any(word in tokens for word in REVIEW_WORDS):
         topics.append("user_experience")
-
     if not topics:
         topics.append("general")
-
     return topics
-
 
 # ---------------------------------------------------------
 # Recommendation detection
@@ -751,7 +693,6 @@ def main():
 
     parser.add_argument("--input", default="data/normalized/normalized.json",help="Normalized JSON input",)
     parser.add_argument("--output",default= "data/evidence/evidence.json",help="Evidence JSON output",)
-
     args = parser.parse_args()
     input_path = Path(args.input)
     output_path = Path(args.output)
