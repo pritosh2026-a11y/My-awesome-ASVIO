@@ -440,6 +440,7 @@ def extract_claim_signals(text: str, brand: str,source_type: str = "website") ->
     """
     sentences = SENTENCE_SPLITTER.split(str(text or ""))
     claims = []
+    
    brand_profile = BRAND_PROFILES.get(brand, {})
     aliases = brand_profile.get("aliases", [brand.lower()])
     escaped_aliases = [re.escape(normalize_text(a)) for a in aliases]
@@ -448,9 +449,20 @@ def extract_claim_signals(text: str, brand: str,source_type: str = "website") ->
         re.IGNORECASE,
     )
 
+    # Source config
+    SOURCE_CONFIG = {
+        "marketing_page": {"reliability": 0.95, "factuality_weight": 0.8},
+        "user_review": {"reliability": 0.85, "factuality_weight": 0.6},
+        "competitor_matrix": {"reliability": 0.7, "factuality_weight": 0.4},
+        "landing_page": {"reliability": 0.9, "factuality_weight": 0.7},
+        "review_platform": {"reliability": 0.8, "factuality_weight": 0.65},
+        "website": {"reliability": 0.9, "factuality_weight": 0.75},
+    }
+
+    cfg = SOURCE_CONFIG.get(source_type, SOURCE_CONFIG["website"])
+
     for idx, sentence in enumerate(sentences):
         sentence_clean = sentence.strip()
-
         if not sentence_clean or len(sentence_clean) < 15:
             continue
 
@@ -462,8 +474,20 @@ def extract_claim_signals(text: str, brand: str,source_type: str = "website") ->
             continue
 
         tokens = tokenize(normalized_sent)
+        
+        # Signal density filter
+        has_signal = (
+            any(w in normalized_sent for w in PRICING_WORDS) or
+            any(w in normalized_sent for w in COMPARISON_WORDS) or
+            any(w in normalized_sent for w in FEATURE_WORDS) or
+            any(w in tokens for w in REVIEW_WORDS) or
+            any(w in tokens for w in ACTION_WORDS) or
+            (source_type in ["customer_review", "review_platform", "forum"] and any(w in tokens for w in REVIEW_WORDS))
+        )
+        if not has_signal:
+            continue
 
-        # Sentence-level polarity assessment
+        # Sentiments + Attribution
         pos_signals = [w for w in POSITIVE_WORDS if w in normalized_sent or w in tokens]
         neg_signals = [w for w in NEGATIVE_WORDS if w in normalized_sent or w in tokens]
 
@@ -473,6 +497,21 @@ def extract_claim_signals(text: str, brand: str,source_type: str = "website") ->
             polarity = "negative"
         else:
             polarity = "neutral"
+
+        action_words = [w for w in tokens if w in ACTION_WORDS or w in VERB_WORDS]
+        if any(w in tokens for w in ["is", "are", "feels", "seems", "appears"]):
+            attribution = "brand_as_object"
+        elif action_words:
+            attribution = "brand_as_subject"
+        else:
+            attribution = "brand_passive"
+
+        # Fact vs Opinion
+        factuality = "mixed"
+        if polarity == "neutral":
+            factuality = "fact"
+        elif len(pos_signals) > 3 or len(neg_signals) > 3:
+            factuality = "opinion"
 
         # Categorize claim type
         claim_type = "general_assertion"
@@ -486,21 +525,33 @@ def extract_claim_signals(text: str, brand: str,source_type: str = "website") ->
             claim_type = "user_experience_or_review"
         elif any(w in normalized_sent for w in FEATURE_WORDS):
             claim_type = "feature_capability"
+        elif action_words:
+            claim_type = "action_description"
 
-        # Determine if mention is core or incidental
-        is_core_mention = idx == 0 or brand_match.start() < (len(normalized_sent) // 2)
+        # Context relevance scoring
+        position_score = 100 if idx == 0 else 70 if brand_match.start() < len(normalized_sent) // 3 else 45
+        sentence_length_bonus = min(len(sentence_clean) // 3, 20)
+        action_density = len(action_words) / max(len(tokens), 1)
+        verb_density = len([w for w in tokens if w in VERB_WORDS]) / max(len(tokens), 1)
+        action_bonus = action_density * 25
+        verb_bonus = verb_density * 15
+
+        relevance_score = position_score + (cfg["reliability"] * 30) + (cfg["factuality_weight"] if factuality == "fact" else 0.3) * 30 + action_bonus + verb_bonus + sentence_length_bonus
+        prominence = min(relevance_score, 100)
+        confidence = max(0.65, prominence / 120)
 
         claims.append(
             {
                 "text": sentence_clean,
                 "claim_type": claim_type,
                 "polarity": polarity,
+                "attribution": attribution,
+                "factuality": factuality,
                 "prominence": "core" if is_core_mention else "incidental",
-                "signals": {
-                    "positive": pos_signals,
-                    "negative": neg_signals,
-                },
+                "signals": {"positive": pos_signals,"negative": neg_signals,},
                 "confidence": 0.85 if is_core_mention else 0.65,
+                "source_type": source_type,
+                "is_core": prominence > 75,
             }
         )
 
@@ -511,7 +562,7 @@ def extract_claim_signals(text: str, brand: str,source_type: str = "website") ->
         reverse=True,
     )
 
-    return claims[:5]
+    return sorted_claims[:5]
 
 
 # ---------------------------------------------------------
