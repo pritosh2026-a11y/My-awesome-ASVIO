@@ -600,9 +600,28 @@ def analyze_result(result: dict, audit_stats: dict) -> dict | None:
     if validated is None:
         audit_stats["invalid_result_structures"] += 1
         return None
-    return validate
+    
 
+    # (now integrated right here with clean audit tracking)
     brand_mentions = detect_brand_mentions(f"{validated['title']}. {validated['snippet']}")
+    brand_analyses = []
+    if not brand_mentions:
+        audit_stats["missing_source_metadata_warnings"] += 1
+        brand_analyses = [{
+            "brand": "unknown",
+            "matched_alias": "unknown",
+            "confidence": 0.0,
+            "signals": "No brand mention detected in this result"
+        }]
+    else:
+        for mention in brand_mentions:
+            brand_analyses.append({
+                "brand": mention["brand"],
+                "matched_alias": mention["matched_alias"],
+                "confidence": mention["confidence"],
+                "signals": f"Matched '{mention['matched_alias']}' (alias for {mention['brand']})"
+            })
+            
     role = classify_role(validated['snippet'], brand_mentions[0]['brand'] if brand_mentions else 'Unknown', 'unknown')
     sentiment = classify_sentiment(validated['snippet'], brand_mentions[0]['brand'] if brand_mentions else 'Unknown')
     topics = detect_topics(validated['snippet'])
