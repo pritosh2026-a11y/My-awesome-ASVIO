@@ -761,7 +761,7 @@ def main():
     input_path = Path(args.input)
     output_path = Path(args.output)
 
-     try:   
+    try:   
         data = load_json(input_path)
         evidence = process_normalized_data(data)
         save_json(evidence,output_path)
@@ -769,7 +769,7 @@ def main():
         print("ASVIO NLP processing complete.")
         print(f"Evidence output: {output_path}")
 
-     except Exception as e:
+    except Exception as e:
             logger.error("Execution failed: %s", str(e), exc_info=True)
             sys.exit(1)
 
