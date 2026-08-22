@@ -30,12 +30,12 @@ import logging
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional,
 from urllib.parse import urlparse
 
 # Configure structured logging for runtime error messaging and audit trails
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[logging.StreamHandler(sys.stderr)],
 )
@@ -161,9 +161,6 @@ SECURITY_WORDS = {
     "security","secure","compliance","privacy","gdpr","soc","encryption","authentication",
 }
 
-import re
-
-
 # ---------------------------------------------------------
 # TEXT NORMALIZATION & TOKENIZATION
 # ---------------------------------------------------------
@@ -222,7 +219,6 @@ Returns:
     - repeated occurrences
     """
     text = normalize_text(text)
-
     return [
         (match.group(), match.start(), match.end())
        for match in re.finditer(r"\b\w+\b", text)
@@ -499,17 +495,11 @@ def extract_claim_signals(text: str, brand: str,source_type: str = "website") ->
     """
     Extract grounded claim-like sentences containing
     the target brand.
-
-    This is deliberately conservative.
-    Now detailed part Classifies sentence-level polarity (positive/negative/neutral), 
-    claim nature (pricing, capability, review, comparison, recommendation),
-    and prominent focus level (core vs incidental).
     """
     sentences = SENTENCE_SPLITTER.split(str(text or ""))
     claims = []
    brand_profile = BRAND_PROFILES.get(brand, {})
     aliases = brand_profile.get("aliases", [brand.lower()])
-
     escaped_aliases = [re.escape(normalize_text(a)) for a in aliases]
     brand_pattern = re.compile(
         rf"(?<![A-Za-z0-9])({'|'.join(escaped_aliases)})(?![A-Za-z0-9])",
@@ -583,25 +573,54 @@ def extract_claim_signals(text: str, brand: str,source_type: str = "website") ->
 
 
 # ---------------------------------------------------------
-# VALIDATION & PIPELINE LOGIC
+# VALIDATION & PIPELINE LOGIC & NORMALIZATION 
 # ---------------------------------------------------------
-
 def validate_input_schema(data: Any) -> Tuple[bool, List[str]]:
     """Strict schema validation for input data payload."""
     errors = []
     if not isinstance(data, dict):
         return False, ["Root payload must be a JSON object."]
-
     if "records" not in data:
         errors.append("Missing mandatory 'records' key in root payload.")
     elif not isinstance(data["records"], list):
         errors.append("Field 'records' must be a list.")
-
     return len(errors) == 0, errors
 
 
+#1. Full docstring + rich analysis (highest priority)
+
+
+def analyze_result(result: dict, audit_stats: dict) -> dict | None:
+"""Full validation layer for a single search result entry.
+
+    Runs validate_result() for fast checks + full brand-context intelligence analysis.
+    Returns rich validated dict OR None if invalid.
+    """
+    validated = validate_result(result)
+    if validated is None:
+        audit_stats["invalid_result_structures"] += 1
+        return None
+    return validate
+
+    brand_mentions = detect_brand_mentions(f"{validated['title']}. {validated['snippet']}")
+    role = classify_role(validated['snippet'], brand_mentions[0]['brand'] if brand_mentions else 'Unknown', 'unknown')
+    sentiment = classify_sentiment(validated['snippet'], brand_mentions[0]['brand'] if brand_mentions else 'Unknown')
+    topics = detect_topics(validated['snippet'])
+    rec = detect_recommendation(validated['snippet'])
+    claims = extract_claim_signals(validated['snippet'], brand_mentions[0]['brand'] if brand_mentions else 'Unknown')
+
+    return {
+        **validated,
+        "brand_mentions": brand_mentions,
+        "role_classification": role,
+        "sentiment": sentiment,
+        "topics": topics,
+        "recommendation": rec,
+        "claims": claims,
+    }
+
 def validate_result(result: dict) -> dict | None:
-    """Validate a single result entry. Returns None if invalid."""
+    """Fast structural/type validation (kept for reference - now only used by analyze_result)."""
     if not isinstance(result, dict):
         return None
 
@@ -611,8 +630,6 @@ def validate_result(result: dict) -> dict | None:
     title = result.get("title", "")
     snippet = result.get("snippet", "")
     url = result.get("url", "")
-
-    # Fast structural checks
     if not url:
         return None
 
@@ -640,13 +657,11 @@ def validate_result(result: dict) -> dict | None:
         "snippet": snippet,
     }
 
-
-# ---------------------------------------------------------
-# Process normalized data
-# ---------------------------------------------------------
+# Updated process_normalized_data (integrated with analyze_result)
 
 def process_normalized_data(data: dict) -> dict:
-    """Processes normalized data payload with full validation, recovery, and audit tracking."""
+    """Processes normalized data payload with full validation, recovery, and audit tracking.
+    Now uses the new analyze_result internally"""
     is_valid, validation_errors = validate_input_schema(data)
     if not is_valid:
         error_msg = "; ".join(validation_errors)
@@ -703,7 +718,7 @@ def process_normalized_data(data: dict) -> dict:
         "stage": "brand_context_intelligence",
         "records": evidence_records,
     }
-
+    
 
 # ---------------------------------------------------------
 # Main
