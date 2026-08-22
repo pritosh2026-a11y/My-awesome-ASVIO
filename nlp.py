@@ -30,7 +30,7 @@ import logging
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Tuple
 from urllib.parse import urlparse
 
 # Configure structured logging for runtime error messaging and audit trails
@@ -132,7 +132,7 @@ NEGATIVE_WORDS = {
 
 # Words suggesting recommendation.
 RECOMMENDATION_WORDS = {
-    "best""top","recommended","recommend","winner","ideal","great choice","good choice","popular choice",
+    "best","top","recommended","recommend","winner","ideal","great choice","good choice","popular choice",
 }
 
 # Words suggesting comparison.
@@ -362,7 +362,10 @@ def classify_role(
     normalized = normalize_text(text)
     tokens = tokenize(normalized)
 
-    if ownership == "first_party":
+   # Ownership mapping (backward-compatible)
+    is_first_party = ownership in ("first_party", "owned")
+
+    if is_first_party:
         return {"type": "brand_owned", "confidence": 0.99}
     if any(word in normalized for word in COMPARISON_WORDS):
         return {"type": "competitor_comparison", "confidence": 0.90}
@@ -426,8 +429,8 @@ def classify_sentiment(
 
         sentiment = "neutral"
 
-     total = positive_score + negative_score
-     confidence = 0.50 if total == 0 else min(0.50 + (abs(positive_score - negative_score) / total) * 0.50, 0.99)
+    total = positive_score + negative_score
+    confidence = 0.50 if total == 0 else min(0.50 + (abs(positive_score - negative_score) / total) * 0.50, 0.99)
 
     return {
         "label": sentiment,
@@ -577,7 +580,6 @@ def extract_claim_signals(text: str, brand: str,source_type: str = "website") ->
     )
 
     return claims[:5]
-    return sorted_claims[:5]
 
 
 # ---------------------------------------------------------
@@ -598,11 +600,9 @@ def validate_input_schema(data: Any) -> Tuple[bool, List[str]]:
     return len(errors) == 0, errors
 
 
-def analyze_result(result: dict,audit_stats: Dict[str, int]) -> dict | None:
-    """Analyze a single result entry safely using pre-computed source metadata."""
+def validate_result(result: dict) -> dict | None:
+    """Validate a single result entry. Returns None if invalid."""
     if not isinstance(result, dict):
-        logger.warning("Skipping malformed non-dict result record: %s", type(result))
-        audit_stats["invalid_result_structures"] += 1
         return None
 
     source_id = result.get("source_id")
@@ -612,63 +612,24 @@ def analyze_result(result: dict,audit_stats: Dict[str, int]) -> dict | None:
     snippet = result.get("snippet", "")
     url = result.get("url", "")
 
+    # Fast structural checks
     if not url:
-        logger.warning("Result entry missing 'url' (source_id=%s, rank=%s)", source_id, rank)
-        audit_stats["missing_url_warnings"] += 1
+        return None
 
     combined_text = f"{title}. {snippet}".strip()
-    if combined_text == ".":
-        logger.warning("Result entry has no title or snippet text (source_id=%s)", source_id)
-        audit_stats["empty_text_warnings"] += 1
+    if not combined_text or combined_text == ".":
+        return None
 
-    mentions = detect_brand_mentions(combined_text)
-    brand_analyses = []
-
-    # Read pre-computed source metadata from processor.py, or fallback gracefully
-    source_meta = result.get("source")
-    if not isinstance(source_meta, dict):
-        logger.warning("Result entry missing pre-computed 'source' object (source_id=%s)", source_id)
-        audit_stats["missing_source_metadata_warnings"] = audit_stats.get("missing_source_metadata_warnings", 0) + 1
-        source_meta = {
-            "ownership": "unknown",
-            "source_type": "unknown",
-            "authority": {
-                "domain_authority": "medium",
-                "topical_relevance": "medium",
-                "source_reliability": "medium"
-            }
-        }
-
-    ownership_type = source_meta.get("ownership", "unknown")
-
-    for mention in mentions:
-        brand = mention["brand"]
-
-        role = classify_role(combined_text, brand, ownership_type)
-        sentiment = classify_sentiment(combined_text, brand)
-        topics = detect_topics(combined_text)
-        recommendation = detect_recommendation(combined_text)
-        
-        claims = extract_claim_signals(
-            combined_text,
-            brand,
-            source_type=source_meta.get("source_type","unknown"),
-        )
-        
-        brand_analyses.append({
-                "brand": brand,
-                "mention": {
-                    "detected": True,
-                    "matched_alias": mention["matched_alias"],
-                    "confidence": mention["confidence"],
-                },
-                "source": source_meta,
-                "role": role,
-                "sentiment": sentiment,
-                "topics": topics,
-                "recommendation": recommendation,
-                "claims": claims,
-            })
+    # Basic field-type guard (no full analysis)
+    if (
+        not isinstance(source_id, (str, int))
+        or not isinstance(rank, (int, float))
+        or not isinstance(title, str)
+        or not isinstance(snippet, str)
+        or not isinstance(url, str)
+        or not isinstance(domain, str)
+    ):
+        return None
 
     return {
         "source_id": source_id,
@@ -676,7 +637,7 @@ def analyze_result(result: dict,audit_stats: Dict[str, int]) -> dict | None:
         "url": url,
         "domain": domain,
         "title": title,
-        "brand_analyses": brand_analyses,
+        "snippet": snippet,
     }
 
 
